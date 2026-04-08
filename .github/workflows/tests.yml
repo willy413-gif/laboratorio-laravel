@@ -4,6 +4,7 @@ on:
   push:
     branches: [ main, develop ]
   pull_request:
+  workflow_dispatch:
 
 jobs:
   tests:
@@ -17,35 +18,54 @@ jobs:
           MYSQL_DATABASE: laravel
         ports:
           - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 --silent"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
 
     steps:
-    - uses: actions/checkout@v4
+      # 1. Clonar repo
+      - name: Checkout código
+        uses: actions/checkout@v4
 
-    - uses: shivammathur/setup-php@v2
-      with:
-        php-version: 8.4
-        extensions: mbstring, pdo, mysql
-        coverage: xdebug
+      # 2. Instalar PHP
+      - name: Configurar PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: 8.4
+          extensions: mbstring, pdo, pdo_mysql
+          coverage: xdebug
 
-    - run: composer install --no-interaction --prefer-dist
+      # 3. Instalar dependencias
+      - name: Instalar Composer
+        run: composer install --no-interaction --prefer-dist --optimize-autoloader
 
-    - name: Configurar entorno
-      run: |
-        cp .env.example .env
-        php artisan key:generate
-        sed -i 's/DB_CONNECTION=.*/DB_CONNECTION=mysql/' .env
-        sed -i 's/DB_HOST=.*/DB_HOST=127.0.0.1/' .env
-        sed -i 's/DB_DATABASE=.*/DB_DATABASE=laravel/' .env
-        sed -i 's/DB_USERNAME=.*/DB_USERNAME=root/' .env
-        sed -i 's/DB_PASSWORD=.*/DB_PASSWORD=password/' .env
+      # 4. Crear .env configurado para CI
+      - name: Configurar entorno
+        run: |
+          cp .env.example .env
+          php artisan key:generate
 
-    - name: Esperar MySQL
-      run: |
-        sudo apt-get install -y mysql-client
-        until mysqladmin ping -h "127.0.0.1" --silent; do
-          sleep 1
-        done
+          echo "DB_CONNECTION=mysql" >> .env
+          echo "DB_HOST=127.0.0.1" >> .env
+          echo "DB_PORT=3306" >> .env
+          echo "DB_DATABASE=laravel" >> .env
+          echo "DB_USERNAME=root" >> .env
+          echo "DB_PASSWORD=password" >> .env
 
-    - run: php artisan migrate
+      # 5. Esperar a que MySQL esté listo
+      - name: Esperar MySQL
+        run: |
+          sudo apt-get install -y mysql-client
+          until mysqladmin ping -h "127.0.0.1" --silent; do
+            sleep 1
+          done
 
-    - run: php artisan test --coverage --min=70
+      # 6. Ejecutar migraciones
+      - name: Migrar base de datos
+        run: php artisan migrate --force
+
+      # 7. Ejecutar tests con coverage mínimo
+      - name: Ejecutar tests
+        run: php artisan test --coverage --min=70
